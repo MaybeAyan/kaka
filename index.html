@@ -176,7 +176,7 @@
     /* 媒体查询：手机端缩小 */
     @media (max-width: 500px) {
       .machine-container {
-        transform: scale(0.9);
+        transform: scale(0.8);
         /* 缩小到 70% */
       }
     }
@@ -473,24 +473,40 @@
 
       playPrintSound();
 
-      // 计算生成位置：
-      // 注意：机器现在有 transform: scale，但纸条是在 body 上的绝对定位。
-      // 我们需要一个比较通用的初始位置，大概在屏幕中心偏下一点点（机器肚子里）。
+      // --- 🟢 核心修复开始：根据设备动态计算尺寸 ---
+      const width = window.innerWidth;
 
-      // 🟢 修改：自动判断屏幕宽度，手机用 95 (190的一半)，电脑用 130 (260的一半)
-      const isMobile = window.innerWidth <= 500;
-      const startX = window.innerWidth / 2 - (isMobile ? 95 : 130);
+      // 1. 定义不同设备的参数
+      let halfPaperWidth = 130; // 电脑纸条宽260的一半
+      let flyDistance = 220;    // 电脑飞行距离
 
-      const startY = window.innerHeight / 2 - 60; // 机器内部位置
+      // 对应 CSS 中的 @media (max-width: 500px) -> scale(0.9)
+      if (width <= 500) {
+        halfPaperWidth = 115; // 手机纸条宽230的一半
+        flyDistance = 160;    // 🟢 缩短飞行距离，适配缩小的机器
+      }
+
+      // 对应 CSS 中的 @media (max-width: 350px) -> scale(0.6)
+      if (width <= 350) {
+        flyDistance = 100;    // 极小屏幕飞得更近
+      }
+
+      // 2. 计算生成位置 (X居中, Y在机器肚子里)
+      const startX = width / 2 - halfPaperWidth;
+      const startY = window.innerHeight / 2 - 60;
 
       const noteData = {
         id: Date.now(),
         text: text,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        x: startX, y: startY, r: Math.random() * 4 - 2,
-        // 初始层级：必须小于 50
-        zIndex: 10 + (notes.length % 30)
+        x: startX,
+        y: startY,
+        r: Math.random() * 4 - 2,
+        zIndex: 10 + (notes.length % 30),
+        // 🟢 关键：把动态计算的飞行距离存入临时变量传给 createPaperElement
+        _flyDistance: flyDistance
       };
+      // --- 核心修复结束 ---
 
       notes.push(noteData); saveToStorage();
       createPaperElement(noteData, true);
@@ -511,21 +527,24 @@
       canvas.appendChild(el);
 
       if (animate) {
-        // 1. 初始位置：在机器肚子里，层级 10（看不见下半截）
+        // 1. 初始位置
         el.style.zIndex = data.zIndex;
         el.style.transform = `translate3d(${data.x}px, ${data.y}px, 0) scale(0.9)`;
 
         requestAnimationFrame(() => {
-          // 2. 动画：滑得更远 (Y - 250px)，模拟“吐”得远一点
+          // 2. 动画
           el.style.transition = 'all 0.8s cubic-bezier(0.65, 0, 0.35, 1)';
-          const targetY = data.y - 220; // 向上滑得更远
+
+          // 🟢 修改这里：使用刚才计算好的动态距离，如果没有就默认 220
+          const dist = data._flyDistance || 220;
+          const targetY = data.y - dist;
+
           el.style.transform = `translate3d(${data.x}px, ${targetY}px, 0) rotate(${data.r}deg) scale(1)`;
 
           setTimeout(() => {
-            // 动画结束后：
-            // 核心改动：不要立刻把层级提高！保持在机器后面 (zIndex < 50)
-            // 只有当用户真的去拖它时，才提上来。
             data.y = targetY;
+            // 删除临时属性，不需要存入localStorage
+            delete data._flyDistance;
             saveToStorage();
             el.style.transition = 'none';
           }, 800);
@@ -553,25 +572,49 @@
     function startDrag(e, el, data) {
       e.preventDefault();
 
-      // 关键逻辑：拖动开始，立马提到最高
-      data.zIndex = ++maxZ;
-      el.style.zIndex = data.zIndex;
+      // 🟢 修改 1: 记录原本的层级
+      // 我们不再修改 data.zIndex 和 maxZ，保持数据层级不变
+      const originalZ = el.style.zIndex;
 
-      el.style.cursor = 'grabbing'; el.style.transition = 'none';
-      const startX = e.clientX; const startY = e.clientY;
-      const initialX = data.x; const initialY = data.y;
+      // 🟢 修改 2: 拖动过程中，临时给一个超级高的层级，防止拖动时被其他东西遮挡
+      el.style.zIndex = 99999;
+
+      el.style.cursor = 'grabbing';
+      el.style.transition = 'none';
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initialX = data.x;
+      const initialY = data.y;
 
       function onMove(e) {
-        const dx = e.clientX - startX; const dy = e.clientY - startY;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
         el.style.transform = `translate3d(${initialX + dx}px, ${initialY + dy}px, 0) rotate(${data.r}deg)`;
-        data.tempX = initialX + dx; data.tempY = initialY + dy;
+        data.tempX = initialX + dx;
+        data.tempY = initialY + dy;
       }
+
       function onUp() {
-        window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+
         el.style.cursor = 'grab';
-        if (data.tempX !== undefined) { data.x = data.tempX; data.y = data.tempY; delete data.tempX; delete data.tempY; saveToStorage(); }
+
+        // 🟢 修改 3: 松手后，立刻恢复成它原本的层级
+        el.style.zIndex = data.zIndex;
+
+        if (data.tempX !== undefined) {
+          data.x = data.tempX;
+          data.y = data.tempY;
+          delete data.tempX;
+          delete data.tempY;
+          saveToStorage();
+        }
       }
-      window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
     }
 
     /* 🟢 新增：监听输入框焦点 */
