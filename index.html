@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Clay Printer Mobile</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@500;700;900&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #E6E8F0;
+      --machine-color: #8CE655;
+      /* 更加嫩绿 */
+      --machine-shadow: #5fa832;
+      --screen-bg: #000;
+      --screen-text: #4AF626;
+      --btn-orange: #FF6620;
+      --btn-orange-shadow: #cc420a;
+      --btn-dark: #2B3036;
+      --btn-dark-shadow: #16191c;
+      --paper-bg: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-touch-callout: none;
+    }
+
+    body {
+      margin: 0;
+      height: 100vh;
+      background-color: var(--bg-color);
+      background-image: radial-gradient(#b0b5be 1.5px, transparent 1.5px);
+      background-size: 24px 24px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* --- 纸条画布 --- */
+    #paper-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      overflow: hidden;
+      /* 纸条层级由 JS 控制，但画布本身不应遮挡机器 */
+    }
+
+    .receipt {
+      position: absolute;
+      width: 260px;
+      /* 稍微改窄一点，显得精致 */
+      background: var(--paper-bg);
+      padding: 22px 26px 45px 26px;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      color: #222;
+      pointer-events: auto;
+      cursor: grab;
+      will-change: transform;
+
+      /* 锯齿边缘 */
+      --mask: radial-gradient(8px at 50% 11.2px, #000 99%, #0000 101%) calc(50% - 16px) 100%/32px 100% repeat-x,
+        radial-gradient(8px at 50% -6.4px, #0000 99%, #000 101%) 50% 100%/32px 100% repeat-x;
+      -webkit-mask: var(--mask);
+      mask: var(--mask);
+    }
+
+    /* 拖动时，阴影加深，层级在 JS 中提高 */
+    .receipt:active {
+      cursor: grabbing;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+    }
+
+    .close-btn {
+      position: absolute;
+      top: -10px;
+      right: -10px;
+      width: 26px;
+      height: 26px;
+      background: #FF4B4B;
+      color: #fff;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+      opacity: 0;
+      transform: scale(0.5);
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+
+    /* 只有在拖拽结束或者未拖拽时的 hover/active 显示删除 */
+    .receipt:not(:active) .close-btn {
+      pointer-events: auto;
+    }
+
+    .receipt:hover .close-btn {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* 移动端点击纸条显示删除 */
+    .receipt:active .close-btn {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .receipt-header {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 2px dashed #eee;
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+      color: #bbb;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+
+    .receipt-body {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.5;
+      margin-bottom: 20px;
+      min-height: 40px;
+      word-break: break-word;
+    }
+
+    .receipt-footer {
+      display: flex;
+      justify-content: space-between;
+      color: #ddd;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    /* --- 机器层容器 --- */
+    .machine-container {
+      position: relative;
+      z-index: 50;
+      /* 机器始终在 50，纸条初始是 10-49，拖拽变 100+ */
+      /* 关键：整体缩小适配移动端 */
+      transform-origin: center center;
+      transition: transform 0.3s ease;
+    }
+
+    /* 媒体查询：手机端缩小 */
+    @media (max-width: 500px) {
+      .machine-container {
+        transform: scale(0.9);
+        /* 缩小到 70% */
+      }
+    }
+
+    /* 🟢 新增：移动端纸条缩小适配 */
+    @media (max-width: 500px) {
+      .receipt {
+        width: 230px;
+        /* 原来是260px */
+        padding: 15px 18px 35px 18px;
+      }
+
+      .receipt-body {
+        font-size: 16px;
+        /* 原来是16px */
+        min-height: 30px;
+        margin-bottom: 15px;
+      }
+
+      .receipt-header,
+      .receipt-footer {
+        font-size: 10px;
+      }
+
+      .close-btn {
+        width: 26px;
+        height: 26px;
+        top: 2px;
+        right: 2px;
+      }
+    }
+
+    /* 极窄屏幕 */
+    @media (max-width: 350px) {
+      .machine-container {
+        transform: scale(0.6);
+      }
+    }
+
+    .machine {
+      width: 420px;
+      /* 保持较宽的比例 */
+      background-color: var(--machine-color);
+      border-radius: 36px;
+      box-shadow:
+        0 18px 0 var(--machine-shadow),
+        0 40px 70px rgba(0, 0, 0, 0.2),
+        inset 0 4px 8px rgba(255, 255, 255, 0.35);
+      padding: 30px 35px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* 插槽盖子 */
+    .slot-cover {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 160px;
+      height: 20px;
+      background: #1a1a1a;
+      border-radius: 10px 10px 0 0;
+      z-index: -1;
+    }
+
+    /* 屏幕 */
+    .screen {
+      background: var(--screen-bg);
+      border-radius: 18px;
+      padding: 18px 22px;
+      height: 110px;
+      box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.6);
+      border: 2px solid rgba(255, 255, 255, 0.04);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .screen-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      opacity: 0.9;
+    }
+
+    textarea {
+      background: transparent;
+      border: none;
+      color: var(--screen-text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      line-height: 1.4;
+      width: 100%;
+      height: 100%;
+      resize: none;
+      outline: none;
+    }
+
+    textarea::placeholder {
+      color: rgba(74, 246, 38, 0.2);
+    }
+
+    /* 按钮区 */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 10px;
+    }
+
+    .btn {
+      border: none;
+      cursor: pointer;
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .btn:active {
+      transform: translateY(5px);
+      box-shadow: none !important;
+    }
+
+    .btn-circle {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--btn-dark);
+      box-shadow: 0 6px 0 var(--btn-dark-shadow), 0 10px 20px rgba(0, 0, 0, 0.2);
+      color: #6c757d;
+    }
+
+    .btn-menu {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: rgba(0, 0, 0, 0.08);
+      color: #4c8026;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .btn-print {
+      flex: 1;
+      height: 60px;
+      border-radius: 16px;
+      background: var(--btn-orange);
+      color: #3e1a0f;
+      font-weight: 900;
+      font-size: 18px;
+      letter-spacing: 1px;
+      box-shadow: 0 8px 0 var(--btn-orange-shadow), 0 12px 25px rgba(255, 102, 46, 0.3);
+      display: flex;
+      gap: 10px;
+    }
+
+    .icon {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+
+    .icon-xs {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- 纸条画板 -->
+  <div id="paper-canvas"></div>
+
+  <!-- 机器容器：用于整体缩放 -->
+  <div class="machine-container">
+    <div class="machine">
+      <div class="slot-cover"></div>
+
+      <!-- 顶部标签 -->
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-size:9px; font-weight:900; letter-spacing:1px; color:#4c8026;">
+          <span
+            style="display:inline-block; width:6px; height:6px; background:#ff4b4b; border-radius:50%; margin-right:6px;"></span>AUTO-FEED
+        </div>
+        <div style="font-size:9px; font-weight:900; color:#4c8026;">5G <span style="font-size:11px;">.ıl</span></div>
+      </div>
+
+      <!-- 屏幕 -->
+      <div class="screen">
+        <div class="screen-header">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <svg class="icon-xs" style="fill:#4c8026" viewBox="0 0 24 24">
+              <path
+                d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z" />
+            </svg>
+            <span style="font-family:'Inter'; font-weight:700; font-size:9px; color:#4c8026">COMPOSE_MODE</span>
+          </div>
+          <svg class="icon-xs" style="fill:#4c8026" viewBox="0 0 24 24">
+            <path
+              d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z" />
+          </svg>
+        </div>
+        <textarea id="input-text" placeholder="> 你好..."></textarea>
+      </div>
+
+      <!-- 按钮 -->
+      <div class="controls">
+        <button class="btn btn-circle" onclick="clearInput()">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+          </svg>
+        </button>
+        <button class="btn btn-circle" onclick="clearStorage()">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+          </svg>
+        </button>
+        <button class="btn btn-menu">
+          <svg class="icon" viewBox="0 0 24 24">
+            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+          </svg>
+        </button>
+        <button class="btn btn-print" onclick="handlePrint()">
+          <span>PRINT</span>
+          <svg class="icon" viewBox="0 0 24 24">
+            <path
+              d="M19 8h-1V3H6v5H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zM8 5h8v3H8V5zm8 12v2H8v-4h8v2zm2-2v-2H6v2H4v-4c0-.55.45-1 1-1h14c.55 0 1 .45 1 1v4h-2z" />
+            <circle cx="18" cy="11.5" r="1" />
+          </svg>
+        </button>
+      </div>
+
+      <div
+        style="position:absolute; bottom:-22px; left:50%; transform:translateX(-50%); background:#1a1a1a; color:#555; padding:4px 10px; font-size:9px; border-radius:0 0 6px 6px; font-weight:bold;">
+        MOTOROLA</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('paper-canvas');
+    const input = document.getElementById('input-text');
+    let notes = [];
+    let maxZ = 200;
+    // 机器的基础层级是 50。
+    // 纸条初始层级范围建议：10 ~ 49。
+    // 拖拽时层级范围建议：200+
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playPrintSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const bufferSize = audioCtx.sampleRate * 0.7;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+      const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 800;
+      const gainNode = audioCtx.createGain();
+      const t = audioCtx.currentTime;
+      gainNode.gain.setValueAtTime(0, t);
+      gainNode.gain.linearRampToValueAtTime(0.5, t + 0.1);
+      gainNode.gain.linearRampToValueAtTime(0.2, t + 0.3);
+      gainNode.gain.linearRampToValueAtTime(0.8, t + 0.5);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
+      filter.frequency.setValueAtTime(400, t); filter.frequency.linearRampToValueAtTime(1200, t + 0.6);
+      noise.connect(filter); filter.connect(gainNode); gainNode.connect(audioCtx.destination); noise.start();
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const saved = localStorage.getItem('clayPrinterNotes');
+      if (saved) {
+        notes = JSON.parse(saved);
+        notes.forEach(note => {
+          // 恢复时的层级逻辑：如果用户之前没拖过（还是低层级），保持低层级；否则保持高层级
+          createPaperElement(note, false);
+        });
+        if (notes.length > 0) maxZ = Math.max(...notes.map(n => n.zIndex), 200) + 1;
+      }
+    });
+
+    function saveToStorage() { localStorage.setItem('clayPrinterNotes', JSON.stringify(notes)); }
+    function clearInput() { input.value = ''; input.focus(); }
+    function clearStorage() { if (confirm("Clear all notes?")) { notes = []; saveToStorage(); canvas.innerHTML = ''; } }
+
+    function handlePrint() {
+      const text = input.value.trim();
+      if (!text) { input.focus(); return; }
+
+      playPrintSound();
+
+      // 计算生成位置：
+      // 注意：机器现在有 transform: scale，但纸条是在 body 上的绝对定位。
+      // 我们需要一个比较通用的初始位置，大概在屏幕中心偏下一点点（机器肚子里）。
+
+      // 🟢 修改：自动判断屏幕宽度，手机用 95 (190的一半)，电脑用 130 (260的一半)
+      const isMobile = window.innerWidth <= 500;
+      const startX = window.innerWidth / 2 - (isMobile ? 95 : 130);
+
+      const startY = window.innerHeight / 2 - 60; // 机器内部位置
+
+      const noteData = {
+        id: Date.now(),
+        text: text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        x: startX, y: startY, r: Math.random() * 4 - 2,
+        // 初始层级：必须小于 50
+        zIndex: 10 + (notes.length % 30)
+      };
+
+      notes.push(noteData); saveToStorage();
+      createPaperElement(noteData, true);
+      input.value = ''; input.blur();
+    }
+
+    function createPaperElement(data, animate) {
+      const el = document.createElement('div');
+      el.classList.add('receipt');
+      el.id = 'note-' + data.id;
+
+      el.innerHTML = `
+                <div class="close-btn">×</div>
+                <div class="receipt-header"><span>MESSAGE</span><span>${data.time}</span></div>
+                <div class="receipt-body">${data.text}</div>
+                <div class="receipt-footer"><span>SERIES-9000</span><span>ID:#${data.id.toString().slice(-4)}</span></div>
+            `;
+      canvas.appendChild(el);
+
+      if (animate) {
+        // 1. 初始位置：在机器肚子里，层级 10（看不见下半截）
+        el.style.zIndex = data.zIndex;
+        el.style.transform = `translate3d(${data.x}px, ${data.y}px, 0) scale(0.9)`;
+
+        requestAnimationFrame(() => {
+          // 2. 动画：滑得更远 (Y - 250px)，模拟“吐”得远一点
+          el.style.transition = 'all 0.8s cubic-bezier(0.65, 0, 0.35, 1)';
+          const targetY = data.y - 220; // 向上滑得更远
+          el.style.transform = `translate3d(${data.x}px, ${targetY}px, 0) rotate(${data.r}deg) scale(1)`;
+
+          setTimeout(() => {
+            // 动画结束后：
+            // 核心改动：不要立刻把层级提高！保持在机器后面 (zIndex < 50)
+            // 只有当用户真的去拖它时，才提上来。
+            data.y = targetY;
+            saveToStorage();
+            el.style.transition = 'none';
+          }, 800);
+        });
+      } else {
+        // 恢复历史
+        el.style.zIndex = data.zIndex;
+        el.style.transform = `translate3d(${data.x}px, ${data.y}px, 0) rotate(${data.r}deg)`;
+      }
+
+      el.querySelector('.close-btn').addEventListener('pointerdown', (e) => { e.stopPropagation(); deleteNote(data.id, el); });
+
+      // 只有按下拖拽时，才提升层级
+      el.addEventListener('pointerdown', (e) => {
+        if (e.target.classList.contains('close-btn')) return;
+        startDrag(e, el, data);
+      });
+    }
+
+    function deleteNote(id, el) {
+      el.style.transition = 'all 0.2s'; el.style.transform += ' scale(0.5)'; el.style.opacity = '0';
+      setTimeout(() => { el.remove(); notes = notes.filter(n => n.id !== id); saveToStorage(); }, 200);
+    }
+
+    function startDrag(e, el, data) {
+      e.preventDefault();
+
+      // 关键逻辑：拖动开始，立马提到最高
+      data.zIndex = ++maxZ;
+      el.style.zIndex = data.zIndex;
+
+      el.style.cursor = 'grabbing'; el.style.transition = 'none';
+      const startX = e.clientX; const startY = e.clientY;
+      const initialX = data.x; const initialY = data.y;
+
+      function onMove(e) {
+        const dx = e.clientX - startX; const dy = e.clientY - startY;
+        el.style.transform = `translate3d(${initialX + dx}px, ${initialY + dy}px, 0) rotate(${data.r}deg)`;
+        data.tempX = initialX + dx; data.tempY = initialY + dy;
+      }
+      function onUp() {
+        window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
+        el.style.cursor = 'grab';
+        if (data.tempX !== undefined) { data.x = data.tempX; data.y = data.tempY; delete data.tempX; delete data.tempY; saveToStorage(); }
+      }
+      window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
+    }
+  </script>
+</body>
+
+</html>
