@@ -44,6 +44,21 @@
       -webkit-user-select: none;
     }
 
+    /* 🟢 新增：输入时淡化背景纸条 */
+    body.typing-mode #paper-canvas {
+      opacity: 0;
+      /* 或者 0.1 如果你想保留一点点影子 */
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      /* 打字时禁止拖动纸条 */
+    }
+
+    /* 确保机器本身不透明 */
+    body.typing-mode .machine-container {
+      z-index: 999;
+      /* 确保机器在最上层 */
+    }
+
     /* --- 纸条画布 --- */
     #paper-canvas {
       position: absolute;
@@ -558,6 +573,26 @@
       }
       window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
     }
+
+    /* 🟢 新增：监听输入框焦点 */
+    input.addEventListener('focus', () => {
+      const isMobile = window.innerWidth <= 500;
+      if (!isMobile) return;
+
+      document.body.classList.add('typing-mode');
+      // 手机端优化：延迟一下滚动，防止键盘遮挡
+      setTimeout(() => {
+        document.body.scrollTop = 0;
+      }, 300);
+    });
+
+    input.addEventListener('blur', () => {
+
+      const isMobile = window.innerWidth <= 500;
+      if (!isMobile) return;
+
+      document.body.classList.remove('typing-mode');
+    });
   </script>
 </body>
 
